@@ -1,4 +1,3 @@
-import httpx
 import re
 import html as html_mod
 import os
@@ -6,15 +5,7 @@ import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-}
+from playwright.sync_api import sync_playwright
 
 FICBOOK_URL_RE = re.compile(
     r"ficbook\.net/readfic/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)",
@@ -27,14 +18,6 @@ def extract_fic_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _make_client():
-    return httpx.Client(
-        headers=HEADERS,
-        follow_redirects=True,
-        timeout=30.0,
-    )
-
-
 def _clean_html_to_text(raw_html: str) -> str:
     text = re.sub(r'<br\s*/?>', '\n', raw_html)
     text = re.sub(r'</p>', '\n\n', text)
@@ -45,13 +28,21 @@ def _clean_html_to_text(raw_html: str) -> str:
     return text.strip()
 
 
-def _parse_fic_info(client, fic_id: str) -> dict:
-    url = f"https://ficbook.net/readfic/{fic_id}"
-    resp = client.get(url)
-    if resp.status_code != 200:
-        raise ValueError(f"Не удалось загрузить страницу ficbook #{fic_id} (status {resp.status_code})")
+def _fetch_page(playwright, url: str) -> str:
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(url, wait_until="networkidle", timeout=30000)
+    html_text = page.content()
+    browser.close()
+    return html_text
 
-    html_text = resp.text
+
+def _parse_fic_info(playwright, fic_id: str) -> dict:
+    url = f"https://ficbook.net/readfic/{fic_id}"
+    html_text = _fetch_page(playwright, url)
+
+    if "404" in html_text[:500] and "not found" in html_text[:500].lower():
+        raise ValueError(f"Фанфик #{fic_id} не найден")
 
     title_m = re.search(r'<h1[^>]*class="heading"[^>]*>\s*<a[^>]*>([^<]+)</a>', html_text)
     if not title_m:
@@ -66,7 +57,6 @@ def _parse_fic_info(client, fic_id: str) -> dict:
     if desc_m:
         description = _clean_html_to_text(desc_m.group(1))
 
-    # Find all chapter links
     fic_id_escaped = re.escape(fic_id)
     chapter_links = re.findall(
         rf'href="(/readfic/{fic_id_escaped}/\d+[^"]*)"', html_text
@@ -84,21 +74,15 @@ def _parse_fic_info(client, fic_id: str) -> dict:
     }
 
 
-def _parse_chapter(client, chapter_url: str) -> tuple[str, str]:
+def _parse_chapter(playwright, chapter_url: str) -> tuple[str, str]:
     full_url = f"https://ficbook.net{chapter_url}"
-    resp = client.get(full_url)
-    if resp.status_code != 200:
-        return ("", "")
+    html_text = _fetch_page(playwright, full_url)
 
-    html_text = resp.text
-
-    # Chapter title
     title_m = re.search(r'class="part-title[^"]*"[^>]*>(.*?)</(?:h2|div|span)', html_text, re.DOTALL)
     chapter_title = ""
     if title_m:
         chapter_title = _clean_html_to_text(title_m.group(1))
 
-    # Chapter text
     text_m = re.search(
         r'id="content"\s+class="js-part-text[^"]*"[^>]*>(.*?)</div>\s*(?:<div class="part-comment)',
         html_text, re.DOTALL
@@ -194,14 +178,13 @@ def fetch_ficbook(url_or_text: str) -> dict:
             "Формат: https://ficbook.net/readfic/XXXXXXX"
         )
 
-    client = _make_client()
-    try:
-        info = _parse_fic_info(client, fic_id)
+    with sync_playwright() as p:
+        info = _parse_fic_info(p, fic_id)
 
         chapters = []
         total = len(info["chapter_links"])
         for i, link in enumerate(info["chapter_links"]):
-            ch_title, ch_text = _parse_chapter(client, link)
+            ch_title, ch_text = _parse_chapter(p, link)
             if ch_text:
                 if not ch_title and total > 1:
                     ch_title = f"Часть {i + 1}"
@@ -216,8 +199,6 @@ def fetch_ficbook(url_or_text: str) -> dict:
             "description": info["description"],
             "chapters": chapters,
         }
-    finally:
-        client.close()
 
 
 def _safe_title(title: str, fic_id: str) -> str:
