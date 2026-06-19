@@ -2,6 +2,7 @@ import cloudscraper
 import re
 import html as html_mod
 import os
+import shutil
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
@@ -227,10 +228,15 @@ def save_ficbook_pdf(fic_data: dict, fic_id: str, dest_dir: str) -> str:
     fb2_path = save_ficbook_fb2(fic_data, fic_id, dest_dir)
     pdf_path = fb2_path.replace(".fb2", ".pdf")
 
-    result = subprocess.run(
-        ["ebook-convert", fb2_path, pdf_path],
-        capture_output=True, timeout=300
-    )
+    for cmd_name in ["ebook-convert", "/usr/bin/ebook-convert", "/usr/local/bin/ebook-convert"]:
+        if shutil.which(cmd_name):
+            result = subprocess.run(
+                [cmd_name, fb2_path, pdf_path],
+                capture_output=True, timeout=300
+            )
+            break
+    else:
+        raise RuntimeError("ebook-convert не найден. Установи Calibre.")
 
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""

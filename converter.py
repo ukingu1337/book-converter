@@ -44,13 +44,20 @@ def find_book_files(files: list[str]) -> list[str]:
             and os.path.isfile(f)]
 
 
+def _find_ebook_convert() -> str:
+    for path in ["ebook-convert", "/usr/bin/ebook-convert", "/usr/local/bin/ebook-convert"]:
+        if shutil.which(path):
+            return path
+    raise RuntimeError("ebook-convert не найден. Установи Calibre.")
+
+
 def convert_file(input_path: str, output_format: str) -> str:
     output_dir = os.path.dirname(input_path)
     base = Path(input_path).stem
     output_path = os.path.join(output_dir, f"{base}.{output_format}")
 
     cmd = [
-        "ebook-convert",
+        _find_ebook_convert(),
         input_path,
         output_path,
     ]

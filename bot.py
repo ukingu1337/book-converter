@@ -42,7 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📚 <b>Book Converter Bot</b>\n\n"
         "Отправь мне файл книги или архив (ZIP/RAR), и я конвертирую его.\n\n"
-        "Также могу скачать фанфик с <b>ficbook.net</b> в FB2/PDF — "
+        "Также могу скачать фанфик с <b>ficbook.net</b> в FB2 — "
         "просто пришли ссылку.\n\n"
         "Поддерживаемые форматы:\n"
         "EPUB, PDF, MOBI, FB2, DOCX, TXT, RTF, DJVU, CBZ, HTML, ODT\n\n"
