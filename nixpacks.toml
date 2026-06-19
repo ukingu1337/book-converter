@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["calibre"]
+
+[start]
+cmd = "python bot.py"

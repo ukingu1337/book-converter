@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.fb2
+*.pdf
+*.epub
+*.txt
+*.log
+Screenshot_*.png
+test_fic*.py
