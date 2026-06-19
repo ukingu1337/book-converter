@@ -1,5 +1,4 @@
 python-telegram-bot==21.6
 rarfile==4.1
 aiofiles==24.1.0
-cloudscraper==1.2.71
 httpx==0.28.1

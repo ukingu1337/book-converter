@@ -1,4 +1,4 @@
-import cloudscraper
+import httpx
 import re
 import html as html_mod
 import os
@@ -8,8 +8,12 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept-Language": "ru-RU,ru;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 FICBOOK_URL_RE = re.compile(
@@ -23,8 +27,12 @@ def extract_fic_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _make_scraper():
-    return cloudscraper.create_scraper()
+def _make_client():
+    return httpx.Client(
+        headers=HEADERS,
+        follow_redirects=True,
+        timeout=30.0,
+    )
 
 
 def _clean_html_to_text(raw_html: str) -> str:
@@ -37,11 +45,11 @@ def _clean_html_to_text(raw_html: str) -> str:
     return text.strip()
 
 
-def _parse_fic_info(scraper, fic_id: str) -> dict:
+def _parse_fic_info(client, fic_id: str) -> dict:
     url = f"https://ficbook.net/readfic/{fic_id}"
-    resp = scraper.get(url, headers=HEADERS)
+    resp = client.get(url)
     if resp.status_code != 200:
-        raise ValueError(f"Не удалось загрузить страницу ficbook #{fic_id}")
+        raise ValueError(f"Не удалось загрузить страницу ficbook #{fic_id} (status {resp.status_code})")
 
     html_text = resp.text
 
@@ -76,9 +84,9 @@ def _parse_fic_info(scraper, fic_id: str) -> dict:
     }
 
 
-def _parse_chapter(scraper, chapter_url: str) -> tuple[str, str]:
+def _parse_chapter(client, chapter_url: str) -> tuple[str, str]:
     full_url = f"https://ficbook.net{chapter_url}"
-    resp = scraper.get(full_url, headers=HEADERS)
+    resp = client.get(full_url)
     if resp.status_code != 200:
         return ("", "")
 
@@ -186,27 +194,30 @@ def fetch_ficbook(url_or_text: str) -> dict:
             "Формат: https://ficbook.net/readfic/XXXXXXX"
         )
 
-    scraper = _make_scraper()
-    info = _parse_fic_info(scraper, fic_id)
+    client = _make_client()
+    try:
+        info = _parse_fic_info(client, fic_id)
 
-    chapters = []
-    total = len(info["chapter_links"])
-    for i, link in enumerate(info["chapter_links"]):
-        ch_title, ch_text = _parse_chapter(scraper, link)
-        if ch_text:
-            if not ch_title and total > 1:
-                ch_title = f"Часть {i + 1}"
-            chapters.append((ch_title, ch_text))
+        chapters = []
+        total = len(info["chapter_links"])
+        for i, link in enumerate(info["chapter_links"]):
+            ch_title, ch_text = _parse_chapter(client, link)
+            if ch_text:
+                if not ch_title and total > 1:
+                    ch_title = f"Часть {i + 1}"
+                chapters.append((ch_title, ch_text))
 
-    if not chapters:
-        raise ValueError("Не удалось извлечь текст фанфика. Возможно, нужна авторизация.")
+        if not chapters:
+            raise ValueError("Не удалось извлечь текст фанфика. Возможно, нужна авторизация.")
 
-    return {
-        "title": info["title"],
-        "author": info["author"],
-        "description": info["description"],
-        "chapters": chapters,
-    }
+        return {
+            "title": info["title"],
+            "author": info["author"],
+            "description": info["description"],
+            "chapters": chapters,
+        }
+    finally:
+        client.close()
 
 
 def _safe_title(title: str, fic_id: str) -> str:
