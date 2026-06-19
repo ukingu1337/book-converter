@@ -5,6 +5,7 @@ __pycache__/
 *.pdf
 *.epub
 *.txt
+!requirements.txt
 *.log
 Screenshot_*.png
 test_fic*.py
