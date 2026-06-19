@@ -18,187 +18,157 @@ def extract_fic_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _clean_html_to_text(raw_html: str) -> str:
-    text = re.sub(r'<br\s*/?>', '\n', raw_html)
+def _clean(text: str) -> str:
+    text = re.sub(r'<br\s*/?>', '\n', text)
     text = re.sub(r'</p>', '\n\n', text)
     text = re.sub(r'<[^>]+>', '', text)
     text = html_mod.unescape(text)
-    text = re.sub(r'&nbsp;', ' ', text)
+    text = text.replace('\xa0', ' ')
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
-
-
-def _fetch_page(playwright, url: str) -> str:
-    browser = playwright.chromium.launch(headless=True)
-    page = browser.new_page()
-    page.goto(url, wait_until="networkidle", timeout=30000)
-    html_text = page.content()
-    browser.close()
-    return html_text
-
-
-def _parse_fic_info(playwright, fic_id: str) -> dict:
-    url = f"https://ficbook.net/readfic/{fic_id}"
-    html_text = _fetch_page(playwright, url)
-
-    if "404" in html_text[:500] and "not found" in html_text[:500].lower():
-        raise ValueError(f"Фанфик #{fic_id} не найден")
-
-    title_m = re.search(r'<h1[^>]*class="heading"[^>]*>\s*<a[^>]*>([^<]+)</a>', html_text)
-    if not title_m:
-        title_m = re.search(r'itemprop="name">([^<]+)<', html_text)
-    title = title_m.group(1).strip() if title_m else f"fic_{fic_id}"
-
-    author_m = re.search(r'itemprop="author">([^<]+)<', html_text)
-    author = author_m.group(1).strip() if author_m else "Unknown"
-
-    desc_m = re.search(r'itemprop="description"[^>]*>(.*?)</div>', html_text, re.DOTALL)
-    description = ""
-    if desc_m:
-        description = _clean_html_to_text(desc_m.group(1))
-
-    fic_id_escaped = re.escape(fic_id)
-    chapter_links = re.findall(
-        rf'href="(/readfic/{fic_id_escaped}/\d+[^"]*)"', html_text
-    )
-    chapter_links = list(dict.fromkeys(chapter_links))
-
-    if not chapter_links:
-        chapter_links = [f"/readfic/{fic_id}"]
-
-    return {
-        "title": title,
-        "author": author,
-        "description": description,
-        "chapter_links": chapter_links,
-    }
-
-
-def _parse_chapter(playwright, chapter_url: str) -> tuple[str, str]:
-    full_url = f"https://ficbook.net{chapter_url}"
-    html_text = _fetch_page(playwright, full_url)
-
-    title_m = re.search(r'class="part-title[^"]*"[^>]*>(.*?)</(?:h2|div|span)', html_text, re.DOTALL)
-    chapter_title = ""
-    if title_m:
-        chapter_title = _clean_html_to_text(title_m.group(1))
-
-    text_m = re.search(
-        r'id="content"\s+class="js-part-text[^"]*"[^>]*>(.*?)</div>\s*(?:<div class="part-comment)',
-        html_text, re.DOTALL
-    )
-    if not text_m:
-        text_m = re.search(
-            r'class="js-part-text[^"]*"[^>]*itemprop="articleBody"[^>]*>(.*?)</div>',
-            html_text, re.DOTALL
-        )
-    if not text_m:
-        text_m = re.search(
-            r'itemprop="articleBody"[^>]*>(.*?)</div>',
-            html_text, re.DOTALL
-        )
-
-    chapter_text = ""
-    if text_m:
-        chapter_text = _clean_html_to_text(text_m.group(1))
-
-    return (chapter_title, chapter_text)
-
-
-def _build_fb2(title: str, author: str, description: str, chapters: list[tuple[str, str]]) -> str:
-    ns = "http://www.gribuser.ru/xml/fictionbook/2.0"
-
-    fb2 = ET.Element("FictionBook", xmlns=ns)
-
-    styles = ET.SubElement(fb2, "stylesheet")
-    styles.text = "p { text-indent: 1.5em; margin: 0; }"
-
-    description_el = ET.SubElement(fb2, "description")
-    title_info = ET.SubElement(description_el, "title-info")
-    ET.SubElement(title_info, "genre").text = "fanfiction"
-    ET.SubElement(title_info, "book-title").text = title
-
-    author_el = ET.SubElement(title_info, "author")
-    ET.SubElement(author_el, "first-name").text = author
-    ET.SubElement(author_el, "nickname").text = author
-
-    if description:
-        annotation = ET.SubElement(title_info, "annotation")
-        for para in description.split("\n\n"):
-            para = para.strip()
-            if para:
-                p = ET.SubElement(annotation, "p")
-                p.text = para
-
-    ET.SubElement(title_info, "lang").text = "ru"
-
-    document_info = ET.SubElement(description_el, "document-info")
-    ET.SubElement(document_info, "program-used").text = "Book Converter Bot"
-    doc_author = ET.SubElement(document_info, "author")
-    ET.SubElement(doc_author, "nickname").text = "BookConverterBot"
-    ET.SubElement(document_info, "id").text = f"ficbook-{title}"
-    ET.SubElement(document_info, "version").text = "1.0"
-
-    publish_info = ET.SubElement(description_el, "publish-info")
-    ET.SubElement(publish_info, "book-name").text = title
-    ET.SubElement(publish_info, "publisher").text = "ficbook.net"
-
-    body = ET.SubElement(fb2, "body")
-
-    for i, (ch_title, ch_text) in enumerate(chapters):
-        if not ch_text:
-            continue
-        section = ET.SubElement(body, "section")
-        if ch_title:
-            section_title = ET.SubElement(section, "title")
-            p = ET.SubElement(section_title, "p")
-            p.text = ch_title
-
-        paragraphs = ch_text.split("\n\n")
-        for para in paragraphs:
-            para = para.strip()
-            if para:
-                p = ET.SubElement(section, "p")
-                p.text = para
-
-    binary = ET.SubElement(fb2, "binary", id="logo", content_type="image/png")
-
-    xml_str = ET.tostring(fb2, encoding="unicode", xml_declaration=False)
-    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n' + xml_str
-
-    pretty = minidom.parseString(xml_str).toprettyxml(indent="  ", encoding="utf-8")
-    return pretty.decode("utf-8")
 
 
 def fetch_ficbook(url_or_text: str) -> dict:
     fic_id = extract_fic_id(url_or_text)
     if not fic_id:
-        raise ValueError(
-            "Не удалось извлечь ID фанфика. "
-            "Формат: https://ficbook.net/readfic/XXXXXXX"
-        )
+        raise ValueError("Не удалось извлечь ID. Формат: https://ficbook.net/readfic/XXXXXXX")
 
-    with sync_playwright() as p:
-        info = _parse_fic_info(p, fic_id)
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            locale="ru-RU",
+        )
+        page = ctx.new_page()
+
+        page.goto(f"https://ficbook.net/readfic/{fic_id}", wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
+
+        title = page.evaluate("""() => {
+            let el = document.querySelector('h1.heading a') || document.querySelector('h1') || document.querySelector('[itemprop="name"]');
+            return el ? el.innerText.trim() : '';
+        }""") or f"fic_{fic_id}"
+
+        author = page.evaluate("""() => {
+            let el = document.querySelector('[itemprop="author"]') || document.querySelector('.author a') || document.querySelector('.author');
+            return el ? el.innerText.trim() : 'Unknown';
+        }""")
+
+        description = page.evaluate("""() => {
+            let el = document.querySelector('[itemprop="description"]') || document.querySelector('.part-description');
+            return el ? el.innerText.trim() : '';
+        }""")
+
+        chapter_links = page.evaluate("""(ficId) => {
+            let links = document.querySelectorAll(`a[href*="/readfic/${ficId}/"]`);
+            let result = [];
+            let seen = new Set();
+            links.forEach(a => {
+                let href = a.getAttribute('href');
+                if (href && !seen.has(href)) {
+                    seen.add(href);
+                    result.push(href);
+                }
+            });
+            return result;
+        }""", fic_id)
+
+        if not chapter_links:
+            chapter_links = [f"/readfic/{fic_id}"]
 
         chapters = []
-        total = len(info["chapter_links"])
-        for i, link in enumerate(info["chapter_links"]):
-            ch_title, ch_text = _parse_chapter(p, link)
+        total = len(chapter_links)
+
+        for i, link in enumerate(chapter_links):
+            full_url = f"https://ficbook.net{link}" if link.startswith("/") else f"https://ficbook.net/{link}"
+            page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+
+            ch_title = page.evaluate("""() => {
+                let el = document.querySelector('.part-title') || document.querySelector('h2');
+                return el ? el.innerText.trim() : '';
+            }""")
+
+            ch_text = page.evaluate("""() => {
+                let el = document.querySelector('#content') ||
+                         document.querySelector('.js-part-text') ||
+                         document.querySelector('[itemprop="articleBody"]') ||
+                         document.querySelector('.text');
+                return el ? el.innerText.trim() : '';
+            }""")
+
             if ch_text:
                 if not ch_title and total > 1:
                     ch_title = f"Часть {i + 1}"
                 chapters.append((ch_title, ch_text))
 
-        if not chapters:
-            raise ValueError("Не удалось извлечь текст фанфика. Возможно, нужна авторизация.")
+        browser.close()
 
-        return {
-            "title": info["title"],
-            "author": info["author"],
-            "description": info["description"],
-            "chapters": chapters,
-        }
+    if not chapters:
+        raise ValueError("Не удалось извлечь текст. Возможно, фанфик требует авторизацию или закрыт.")
+
+    return {
+        "title": title,
+        "author": author,
+        "description": description,
+        "chapters": chapters,
+    }
+
+
+def _build_fb2(title: str, author: str, description: str, chapters: list[tuple[str, str]]) -> str:
+    ns = "http://www.gribuser.ru/xml/fictionbook/2.0"
+    fb2 = ET.Element("FictionBook", xmlns=ns)
+
+    ET.SubElement(fb2, "stylesheet").text = "p { text-indent: 1.5em; margin: 0; }"
+
+    desc_el = ET.SubElement(fb2, "description")
+    ti = ET.SubElement(desc_el, "title-info")
+    ET.SubElement(ti, "genre").text = "fanfiction"
+    ET.SubElement(ti, "book-title").text = title
+
+    a = ET.SubElement(ti, "author")
+    ET.SubElement(a, "first-name").text = author
+    ET.SubElement(a, "nickname").text = author
+
+    if description:
+        ann = ET.SubElement(ti, "annotation")
+        for para in description.split("\n\n"):
+            if para.strip():
+                p = ET.SubElement(ann, "p")
+                p.text = para.strip()
+
+    ET.SubElement(ti, "lang").text = "ru"
+
+    di = ET.SubElement(desc_el, "document-info")
+    ET.SubElement(di, "program-used").text = "Book Converter Bot"
+    da = ET.SubElement(di, "author")
+    ET.SubElement(da, "nickname").text = "BookConverterBot"
+    ET.SubElement(di, "id").text = f"ficbook-{title}"
+    ET.SubElement(di, "version").text = "1.0"
+
+    pi = ET.SubElement(desc_el, "publish-info")
+    ET.SubElement(pi, "book-name").text = title
+    ET.SubElement(pi, "publisher").text = "ficbook.net"
+
+    body = ET.SubElement(fb2, "body")
+    for ch_title, ch_text in chapters:
+        if not ch_text:
+            continue
+        section = ET.SubElement(body, "section")
+        if ch_title:
+            st = ET.SubElement(section, "title")
+            p = ET.SubElement(st, "p")
+            p.text = ch_title
+        for para in ch_text.split("\n\n"):
+            if para.strip():
+                p = ET.SubElement(section, "p")
+                p.text = para.strip()
+
+    ET.SubElement(fb2, "binary", id="logo", content_type="image/png")
+
+    xml_str = ET.tostring(fb2, encoding="unicode", xml_declaration=False)
+    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n' + xml_str
+    return minidom.parseString(xml_str).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
 
 
 def _safe_title(title: str, fic_id: str) -> str:
@@ -207,57 +177,20 @@ def _safe_title(title: str, fic_id: str) -> str:
 
 
 def save_ficbook_fb2(fic_data: dict, fic_id: str, dest_dir: str) -> str:
-    fb2_content = _build_fb2(
-        fic_data["title"], fic_data["author"],
-        fic_data["description"], fic_data["chapters"]
-    )
+    fb2 = _build_fb2(fic_data["title"], fic_data["author"], fic_data["description"], fic_data["chapters"])
     filename = f"{_safe_title(fic_data['title'], fic_id)}.fb2"
     filepath = os.path.join(dest_dir, filename)
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(fb2_content)
+        f.write(fb2)
     return filepath
 
 
 def save_ficbook_pdf(fic_data: dict, fic_id: str, dest_dir: str) -> str:
     fb2_path = save_ficbook_fb2(fic_data, fic_id, dest_dir)
     pdf_path = fb2_path.replace(".fb2", ".pdf")
-
-    result = subprocess.run(
-        ["ebook-convert", fb2_path, pdf_path],
-        capture_output=True, timeout=300
-    )
-
+    result = subprocess.run(["ebook-convert", fb2_path, pdf_path], capture_output=True, timeout=300)
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
         raise RuntimeError(stderr or "ebook-convert failed")
-
     os.remove(fb2_path)
     return pdf_path
-
-
-def download_ficbook_fb2_sync(url_or_text: str, dest_dir: str) -> str:
-    fic_id = extract_fic_id(url_or_text)
-    if not fic_id:
-        raise ValueError("Не удалось извлечь ID фанфика.")
-    data = fetch_ficbook(url_or_text)
-    return save_ficbook_fb2(data, fic_id, dest_dir)
-
-
-def download_ficbook_pdf_sync(url_or_text: str, dest_dir: str) -> str:
-    fic_id = extract_fic_id(url_or_text)
-    if not fic_id:
-        raise ValueError("Не удалось извлечь ID фанфика.")
-    data = fetch_ficbook(url_or_text)
-    return save_ficbook_pdf(data, fic_id, dest_dir)
-
-
-async def download_ficbook_fb2(url_or_text: str, dest_dir: str) -> str:
-    import asyncio
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, download_ficbook_fb2_sync, url_or_text, dest_dir)
-
-
-async def download_ficbook_pdf(url_or_text: str, dest_dir: str) -> str:
-    import asyncio
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, download_ficbook_pdf_sync, url_or_text, dest_dir)
