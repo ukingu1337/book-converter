@@ -276,11 +276,11 @@ def download_ficbook_pdf_sync(url_or_text: str, dest_dir: str) -> str:
 
 async def download_ficbook_fb2(url_or_text: str, dest_dir: str) -> str:
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, download_ficbook_fb2_sync, url_or_text, dest_dir)
 
 
 async def download_ficbook_pdf(url_or_text: str, dest_dir: str) -> str:
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, download_ficbook_pdf_sync, url_or_text, dest_dir)

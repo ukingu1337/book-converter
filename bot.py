@@ -69,12 +69,21 @@ async def handle_ficbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     fic_id = extract_fic_id(text)
     if not fic_id:
+        await update.message.reply_text(
+            "🤔 Я не понял сообщение.\n\n"
+            "Отправь мне:\n"
+            "• Файл книги (.epub, .pdf, .fb2 и др.)\n"
+            "• Архив ZIP/RAR с книгами\n"
+            "• Ссылку на ficbook.net\n\n"
+            "Нажми /help для подробностей.",
+            parse_mode="HTML"
+        )
         return
 
     status_msg = await update.message.reply_text("⏳ Загружаю данные фанфика с ficbook.net...")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         fic_data = await loop.run_in_executor(None, fetch_ficbook, text)
 
         user_states[update.message.from_user.id] = {
@@ -217,7 +226,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             tmpdir = tempfile.mkdtemp(prefix="ficbook_")
 
             if fmt == "fb2":
@@ -276,7 +285,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, convert_book, filepath, target_format)
 
         if isinstance(result, list):
