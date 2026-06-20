@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends calibre wget unrar && \
+    apt-get install -y --no-install-recommends calibre wget p7zip-full && \
     which ebook-convert || (echo "ebook-convert NOT FOUND" && exit 1) && \
     rm -rf /var/lib/apt/lists/*
 
