@@ -171,26 +171,38 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    user_id = query.from_user.id
-
-    # Удаляем старое меню с кнопками
+    if not query:
+        logger.warning("CallbackQuery is None")
+        return
     try:
-        await context.bot.delete_message(
-            chat_id=query.message.chat_id,
-            message_id=query.message.message_id
-        )
+        await query.answer()
+    except Exception as e:
+        logger.error(f"query.answer() failed: {e}")
+
+    data = query.data or ""
+    user_id = query.from_user.id
+    logger.info(f"Callback received: data={data} user={user_id}")
+
+    try:
+        chat_id = query.message.chat_id if query.message else query.from_user.id
     except Exception:
-        pass
+        chat_id = query.from_user.id
+
+    if query.message:
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=query.message.message_id
+            )
+        except Exception:
+            pass
 
     if data.startswith("fic:"):
         fmt = data.split(":")[1]
         state = user_states.get(user_id)
         if not state or "fic_data" not in state:
             await context.bot.send_message(
-                chat_id=query.message.chat_id,
+                chat_id=chat_id,
                 text="❌ Сессия устарела. Отправь ссылку заново."
             )
             return
@@ -199,7 +211,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fic_id = state["fic_id"]
 
         status_msg = await context.bot.send_message(
-            chat_id=query.message.chat_id,
+            chat_id=chat_id,
             text=f"🔄 Скачиваю <b>{escape(fic_data['title'])}</b> в формате {fmt.upper()}...",
             parse_mode="HTML"
         )
@@ -220,7 +232,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filename = Path(filepath).name
             with open(filepath, "rb") as f:
                 await context.bot.send_document(
-                    chat_id=query.message.chat_id,
+                    chat_id=chat_id,
                     document=f,
                     filename=filename,
                     caption=f"📖 {filename}"
@@ -250,7 +262,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states.get(user_id)
     if not state:
         await context.bot.send_message(
-            chat_id=query.message.chat_id,
+            chat_id=chat_id,
             text="❌ Сессия устарела. Отправь файл заново."
         )
         return
@@ -258,7 +270,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filepath = state["filepath"]
 
     status_msg = await context.bot.send_message(
-        chat_id=query.message.chat_id,
+        chat_id=chat_id,
         text=f"🔄 Конвертирую <b>{state['filename']}</b> → <b>{FORMAT_NAMES.get(target_format, target_format.upper())}</b>...",
         parse_mode="HTML"
     )
@@ -271,7 +283,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for r in result:
                 with open(r, 'rb') as f:
                     await context.bot.send_document(
-                        chat_id=query.message.chat_id,
+                        chat_id=chat_id,
                         document=f,
                         filename=Path(r).name,
                         caption=f"✅ {Path(r).name}"
@@ -283,7 +295,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             with open(result, 'rb') as f:
                 await context.bot.send_document(
-                    chat_id=query.message.chat_id,
+                    chat_id=chat_id,
                     document=f,
                     filename=Path(result).name,
                     caption=f"✅ {Path(result).name}"
@@ -324,7 +336,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ficbook))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(CallbackQueryHandler(handle_callback), group=1)
 
     print("🤖 Book Converter Bot запущен!")
     app.run_polling()
