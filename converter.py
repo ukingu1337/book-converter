@@ -62,7 +62,11 @@ def convert_file(input_path: str, output_format: str) -> str:
         output_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, timeout=300)
+    env = os.environ.copy()
+    env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu"
+    env["QT_QPA_PLATFORM"] = "offscreen"
+
+    result = subprocess.run(cmd, capture_output=True, timeout=300, env=env)
 
     stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
     stdout = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""

@@ -242,9 +242,12 @@ def save_ficbook_pdf(fic_data: dict, fic_id: str, dest_dir: str) -> str:
 
     for cmd_name in ["ebook-convert", "/usr/bin/ebook-convert", "/usr/local/bin/ebook-convert"]:
         if shutil.which(cmd_name):
+            env = os.environ.copy()
+            env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu"
+            env["QT_QPA_PLATFORM"] = "offscreen"
             result = subprocess.run(
                 [cmd_name, fb2_path, pdf_path],
-                capture_output=True, timeout=300
+                capture_output=True, timeout=300, env=env
             )
             break
     else:
