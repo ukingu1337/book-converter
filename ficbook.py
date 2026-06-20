@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
@@ -185,7 +186,18 @@ def fetch_ficbook(url_or_text: str) -> dict:
         )
 
     scraper = _make_scraper()
-    info = _parse_fic_info(scraper, fic_id)
+    last_err = None
+    for attempt in range(3):
+        try:
+            info = _parse_fic_info(scraper, fic_id)
+            break
+        except ValueError as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                scraper = _make_scraper()
+    else:
+        raise last_err
 
     chapters = []
     total = len(info["chapter_links"])

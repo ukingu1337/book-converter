@@ -130,9 +130,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_drive(filepath)
 
         if ext in SUPPORTED_FORMATS:
-            available = [f for f in SUPPORTED_FORMATS if f != ext]
+            available = [f.lstrip('.') for f in SUPPORTED_FORMATS if f != ext]
         else:
-            available = sorted(SUPPORTED_FORMATS)
+            available = sorted(f.lstrip('.') for f in SUPPORTED_FORMATS)
 
         buttons = []
         row = []
